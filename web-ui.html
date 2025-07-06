@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Disaster Recovery Simulator – Baby‑Friendly UI</title>
+  <style>
+    :root {
+      --green: #28a745;
+      --red: #dc3545;
+      --yellow: #ffc107;
+      --blue: #17a2b8;
+      font-size: 16px;
+    }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f5f7fa;
+      color: #212529;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h1 {
+      margin-top: 0;
+      color: #343a40;
+      font-size: 1.8rem;
+    }
+
+    section {
+      margin-top: 1.5rem;
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 1rem;
+      margin: 6px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, .1);
+    }
+
+    button:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    #backupBtn {
+      background: var(--blue);
+      color: #fff;
+    }
+
+    #disasterBtn {
+      background: var(--red);
+      color: #fff;
+    }
+
+    #restoreBtn {
+      background: var(--green);
+      color: #fff;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .05);
+      padding: 16px;
+      margin-top: 1rem;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      margin-left: 6px;
+    }
+
+    .green { background: var(--green); }
+    .red   { background: var(--red);   }
+    .yellow{ background: var(--yellow); }
+
+    #log {
+      background: #000;
+      color: #0f0;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 0.8rem;
+      height: 160px;
+      overflow-y: auto;
+      border-radius: 4px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+      margin-top: .5rem;
+    }
+
+    td, th {
+      border: 1px solid #dee2e6;
+      padding: 6px 8px;
+      text-align: left;
+    }
+
+    th {
+      background: #e9ecef;
+    }
+
+    .step {
+      display: flex;
+      align-items: center;
+      margin-bottom: .4rem;
+    }
+
+    .step span {
+      margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🗄️ Disaster Recovery Simulator <small>(understand DR in 3 clicks!)</small></h1>
+
+  <section class="card" id="instructions">
+    <h2>👶 How it works (for total beginners)</h2>
+    <div class="step"><strong>1️⃣</strong><span>Click <strong>Backup</strong> to take a safety copy of the database.<br><em>Think of it as saving your homework before exiting MS‑Word.</em></span></div>
+    <div class="step"><strong>2️⃣</strong><span>Click <strong>Simulate&nbsp;Disaster</strong> to <mark>break</mark> the database.<br><em>We pull the plug to see what happens.</em></span></div>
+    <div class="step"><strong>3️⃣</strong><span>Click <strong>Restore</strong> to bring everything back. Watch the ⏱️ timer – that’s how fast you recovered (<abbr title="Recovery Time Objective">RTO</abbr>).</span></div>
+  </section>
+
+  <section class="card">
+    <h2>⚙️ Controls</h2>
+    <button id="backupBtn"   onclick="trigger('backup')"   title="Create a fresh backup first!">📦 Backup</button>
+    <button id="disasterBtn" onclick="trigger('disaster')" title="Kaboom. Delete the data volume.">💣 Simulate&nbsp;Disaster</button>
+    <button id="restoreBtn"  onclick="trigger('restore')"  title="Re‑create container &amp; load backup">♻️ Restore</button>
+    <span id="busy" style="display:none;margin-left:10px;">⏳ Working...</span>
+  </section>
+
+  <section class="card">
+    <h2>📊 Live Status (auto‑refresh every 2 s)</h2>
+    <table>
+      <tr><th>Container</th><td id="contName">‑</td></tr>
+      <tr><th>State</th><td id="stateText">‑ <span id="stateDot" class="status-dot yellow"></span></td></tr>
+      <tr><th>DR Strategy</th><td id="strategy">Backup & Restore</td></tr>
+      <tr><th>Last Backup</th><td id="lastBackup">‑</td></tr>
+      <tr><th>Last Disaster</th><td id="lastDisaster">‑</td></tr>
+      <tr><th>Last Restore</th><td id="lastRestore">‑</td></tr>
+      <tr><th>⏱️ Current RTO</th><td id="rto">‑</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>📜 Behind‑the‑Scenes Log (nerd view)</h2>
+    <div id="log">Log streaming&nbsp;…</div>
+  </section>
+
+<script>
+const apiBase = '';
+let timer = null, disasterStart = null;
+
+function setBusy(on) {
+  document.getElementById('busy').style.display = on ? 'inline-block' : 'none';
+  ['backupBtn','disasterBtn','restoreBtn'].forEach(id => {
+    document.getElementById(id).disabled = on;
+  });
+}
+
+function trigger(action) {
+  setBusy(true);
+  fetch(`${apiBase}/${action}`)
+    .then(rs => rs.json ? rs.json() : rs.text())
+    .then(() => {
+      if (action === 'disaster') {
+        disasterStart = Date.now();
+        startTimer();
+      }
+    })
+    .finally(() => setTimeout(() => setBusy(false), 3500));
+}
+
+function startTimer() {
+  if (timer) return;
+  timer = setInterval(() => updateRTO(), 1000);
+}
+
+function stopTimer() {
+  clearInterval(timer);
+  timer = null;
+  disasterStart = null;
+  document.getElementById('rto').textContent = '0';
+}
+
+function updateRTO() {
+  if (!disasterStart) {
+    document.getElementById('rto').textContent = '‑';
+    return;
+  }
+  const sec = Math.floor((Date.now() - disasterStart) / 1000);
+  document.getElementById('rto').textContent = sec + ' s';
+}
+
+function updateStatus() {
+  fetch(`${apiBase}/status`)
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById('contName').textContent = d.container || 'postgres-db';
+      const stateDot = document.getElementById('stateDot');
+      const text = document.getElementById('stateText');
+      text.firstChild.nodeValue = d.state;
+      stateDot.className = 'status-dot ' + (d.state === 'Running' ? 'green' : d.state === 'Stopped' ? 'red' : 'yellow');
+      document.getElementById('lastBackup').textContent = d.last_backup || '‑';
+      document.getElementById('lastDisaster').textContent = d.last_disaster || '‑';
+      document.getElementById('lastRestore').textContent = d.last_restore || '‑';
+
+      if (d.state === 'Running') {
+        stopTimer();
+      } else if (d.state === 'Stopped' && !timer) {
+        startTimer();
+      }
+    });
+}
+
+function fetchLogs() {
+  fetch(`${apiBase}/logs`).then(r => r.text()).then(t => {
+    const logDiv = document.getElementById('log');
+    logDiv.textContent = t;
+    logDiv.scrollTop = logDiv.scrollHeight;
+  });
+}
+
+(function startLoops() {
+  updateStatus();
+  fetchLogs();
+  setInterval(() => {
+    updateStatus();
+    fetchLogs();
+  }, 2000);
+})();
+</script>
+</body>
+</html>
